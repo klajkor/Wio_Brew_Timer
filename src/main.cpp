@@ -2,8 +2,8 @@
 
 #include <TFT_eSPI.h>
 #include "Free_Fonts.h"
-
-#define SERIAL_DEBUG_ENABLED 1
+#include "main.h"
+#include "temperature_meter.h"
 
 #define COUNTER_STATE_RESET 0
 #define COUNTER_STATE_DISABLED 1
@@ -37,15 +37,15 @@
 #define DISPLAY_STATE_DO_NOTHING 5
 
 // EDIT THE FOLLOWING TO DECLARE BUTTON PINS FOR OTHER ARDUINO BOARDS
-const auto start_button = WIO_KEY_C;
-const auto stop_button = WIO_KEY_B;
+// const auto start_button = WIO_KEY_C;
+// const auto stop_button = WIO_KEY_B;
 
 unsigned long int timer_counter;
 unsigned int brew_timer_counter;
 
 //Switch Variables - "Reed_Switch"
 int state_Reed_Switch = 0; //The actual ~state~ of the state machine
-int pin_Reed_Switch = start_button;                //Input/Output (IO) pin for the switch, 10 = pin 10 a.k.a. D10
+int pin_Reed_Switch = D0;                //Input/Output (IO) pin for the switch, 10 = pin 10 a.k.a. D10
 int value_Reed_Switch = 0;                      //Value of the switch ("HIGH" or "LOW")
 unsigned long t_Reed_Switch = 0;                //Typically represents the current time of the switch
 unsigned long t_0_Reed_Switch = 0;              //The time that we last passed through an interesting state
@@ -53,11 +53,17 @@ unsigned long bounce_delay_Reed_Switch = 5;     //The delay to filter bouncing
 unsigned int bin_counter = 0;                   //binary counter for reed switch
 int virtual_Reed_Switch = VIRT_REED_SWITCH_OFF; // virtual switch
 
+//ADC variables
+int pin_ADC_input = A1;
+
 //SM Display variables
 int state_Display = 0;
 unsigned long t_Display = 0;
 unsigned long t_0_Display = 0;
 unsigned long delay_For_Stopped_Timer = 5000; //millisec
+unsigned long t_Temp_Display = 0;
+unsigned long t_0_Temp_Display = 0;
+unsigned long delay_For_Temp_Display = 500; //millisec
 
 //SM Counter variables
 int state_counter1 = 0;      //The actual ~state~ of the state machine
@@ -76,16 +82,7 @@ TFT_eSPI tft;
 TFT_eSprite background(&tft);
 TFT_eSprite brew_timer(&tft);
 TFT_eSprite brew_temperature(&tft);
-
-void update_TimeCounterStr(int tMinutes, int tSeconds);
-void StateMachine_counter1(void);
-void StateMachine_Reed_Switch(void);
-void StateMachine_Display(void);
-void Display_Running_Timer(void);
-void Display_Stopped_Timer(void);
-void display_Timer_On_All(bool need_Display_Clear, bool need_Display_Stopped);
-void set_background(void);
-void show_temperature(void);
+TFT_eSprite brew_millivolt(&tft);
 
 void set_background(void)
 {
@@ -100,18 +97,13 @@ void set_background(void)
     background.drawFastVLine(150, 60, 190, TFT_DARKGREEN);
     //background.drawFastHLine(0, 140, 320, TFT_DARKGREEN);
     background.pushSprite(0, 0);
+    background.deleteSprite();
 }
 
-void show_temperature(void)
+void GPIO_init(void)
 {
-    brew_temperature.createSprite(140, 60);
-    brew_temperature.fillSprite(TFT_WHITE);
-    brew_temperature.setCursor(0, 0);
-    brew_temperature.setFreeFont(FSSB18);
-    brew_temperature.setTextSize(1);
-    brew_temperature.setTextColor(TFT_RED);
-    brew_temperature.drawString("94.5 *C", 0, 0);
-    brew_temperature.pushSprite(175, 135);
+    pinMode(pin_Reed_Switch, INPUT_PULLUP);
+    pinMode(pin_ADC_input, INPUT);
 }
 
 void setup()
@@ -120,11 +112,10 @@ void setup()
 #ifdef SERIAL_DEBUG_ENABLED
     Serial.println(F("Debugging is ON"));
 #endif
-    pinMode(start_button, INPUT_PULLUP);
-    pinMode(stop_button, INPUT_PULLUP);
-
+    GPIO_init();
     StateMachine_counter1();
     StateMachine_Reed_Switch();
+    state_machine_volt_meter();
     state_Display = DISPLAY_STATE_RESET;
     StateMachine_Display();
     tft.init();
@@ -132,18 +123,15 @@ void setup()
     tft.fillScreen(TFT_BLACK);
     set_background();
     brew_timer.createSprite(100, 60);
+    brew_temperature.createSprite(150, 60);
+    brew_millivolt.createSprite(100, 25);
     display_Timer_On_All(true,true);
-    show_temperature();
+    show_temperature(TEMPERATURE_STR_V2);
+    show_millivolt(MILLI_VOLT_STR);
 }
 
 void loop()
 {
-    if (digitalRead(start_button) == LOW)
-    {
-    }
-    if (digitalRead(stop_button) == LOW)
-    {
-    }
     StateMachine_Reed_Switch();
 
     //Provide events that can force the state machines to change state
@@ -163,6 +151,7 @@ void loop()
         break;
     }
     StateMachine_counter1();
+    state_machine_volt_meter();
     StateMachine_Display();
 }
 
@@ -311,13 +300,14 @@ void StateMachine_Display(void)
     switch (state_Display)
     {
     case DISPLAY_STATE_RESET:
+        t_0_Temp_Display = millis();
         Display_Stopped_Timer();
         state_Display = DISPLAY_STATE_TEMPERATURE;
         break;
 
     case DISPLAY_STATE_TIMER_RUNNING:
         Display_Running_Timer();
-        //Display_Temperature();
+        // show_temperature(TEMPERATURE_STR_V2);
         state_Display = DISPLAY_STATE_TEMPERATURE;
         break;
 
@@ -336,8 +326,14 @@ void StateMachine_Display(void)
         break;
 
     case DISPLAY_STATE_TEMPERATURE:
-        //Display_Temperature();
-        state_Display = DISPLAY_STATE_DO_NOTHING;
+        t_Temp_Display = millis();
+        if (t_Temp_Display - t_0_Temp_Display > delay_For_Temp_Display)
+        {
+            show_temperature(TEMPERATURE_STR_V2);
+            show_millivolt(MILLI_VOLT_STR);
+            t_0_Temp_Display = millis();
+            state_Display = DISPLAY_STATE_TEMPERATURE;
+        }
         break;
 
     case DISPLAY_STATE_DO_NOTHING:
@@ -383,3 +379,31 @@ void display_Timer_On_All(bool need_Display_Clear, bool need_Display_Stopped)
     brew_timer.pushSprite(35, 130);
 }
 
+
+void show_temperature(char *pTemperatureStr)
+{
+    char disp_string[9];
+
+    snprintf(disp_string,9,"%s *C",pTemperatureStr);
+    brew_temperature.fillSprite(TFT_WHITE);
+    brew_temperature.setCursor(0, 0);
+    brew_temperature.setFreeFont(FSSB18);
+    brew_temperature.setTextSize(1);
+    brew_temperature.setTextColor(TFT_RED);
+    brew_temperature.drawString(disp_string, 0, 0);
+    brew_temperature.pushSprite(170, 135);
+}
+
+void show_millivolt(char *pMillivoltStr)
+{
+    char disp_string[9];
+
+    snprintf(disp_string,9,"%s mV",pMillivoltStr);
+    brew_millivolt.fillSprite(TFT_WHITE);
+    brew_millivolt.setCursor(0, 0);
+    brew_millivolt.setFreeFont(FSS9);
+    brew_millivolt.setTextSize(1);
+    brew_millivolt.setTextColor(TFT_BLUE);
+    brew_millivolt.drawString(disp_string, 0, 0);
+    brew_millivolt.pushSprite(195, 215);
+}
