@@ -22,6 +22,13 @@
 // reference Vcc voltage
 #define LMREF ((float)(5.07)) // measured from LMBoard --- GND Board
 
+// Input voltage divider resistance values:
+// (required to ensure that the voltage at the input is less than 3.3V)
+#define VOLT_DIV_R1 ((float)(3.41)) // MegaOhm
+#define VOLT_DIV_R2 ((float)(5.0)) // MegaOhm
+// To multiply the measured voltage with to get the real voltage before the divider:
+#define VOLT_DIV_MULTIPLIER ((float)((VOLT_DIV_R1 + VOLT_DIV_R2) / VOLT_DIV_R2))
+
 
 // State Machine "Volt Meter" variables
 static int           state_volt_meter = VOLT_METER_STATE_RESET;
@@ -41,7 +48,7 @@ float get_thermistor_voltage(void)
 
     bus_voltage_V = 1.23;
     ADC_raw=analogRead(pin_ADC_input);
-    bus_voltage_V = (3.3/1023) * ADC_raw;
+    bus_voltage_V = ((3.3/1023) * ADC_raw) * VOLT_DIV_MULTIPLIER;
 
     // debug display
 #ifdef SERIAL_DEBUG_ENABLED
