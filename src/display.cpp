@@ -165,11 +165,3 @@ void Display_Temperature(char *pTemperatureStr, char *pMillivoltStr)
 
     brew_temperature.pushSprite(170, 135);
 }
-
-void show_millivolt(char *pMillivoltStr)
-{
-
-    //brew_millivolt.fillSprite(TFT_WHITE);
-
-    //brew_millivolt.pushSprite(195, 215);
-}

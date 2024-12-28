@@ -59,7 +59,6 @@ void setup()
     StateMachine_Display();
     display_Timer_On_All(true,true);
     Display_Temperature(TEMPERATURE_STR_V2, MILLI_VOLT_STR);
-    show_millivolt(MILLI_VOLT_STR);
 }
 
 void loop()

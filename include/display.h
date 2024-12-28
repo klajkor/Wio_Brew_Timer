@@ -31,4 +31,3 @@ void display_Timer_On_All(bool need_Display_Clear, bool need_Display_Stopped);
 void Display_Running_Timer(void);
 void Display_Stopped_Timer(void);
 void Display_Temperature(char *pTemperatureStr, char *pMillivoltStr);
-void show_millivolt(char *pMillivoltStr);
