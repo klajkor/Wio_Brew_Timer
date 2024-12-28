@@ -1,40 +1,8 @@
 #include <Arduino.h>
 
-#include <TFT_eSPI.h>
-#include "Free_Fonts.h"
 #include "main.h"
 #include "temperature_meter.h"
-
-#define COUNTER_STATE_RESET 0
-#define COUNTER_STATE_DISABLED 1
-#define COUNTER_STATE_START 2
-#define COUNTER_STATE_COUNTING 3
-#define COUNTER_STATE_STOP 4
-
-#define DISPLAY_CLEAR_TRUE true
-#define DISPLAY_CLEAR_FALSE false
-#define DISPLAY_STOPPED_TRUE true
-#define DISPLAY_STOPPED_FALSE false
-
-#define SW_ON_LEVEL LOW   /* Switch on level */
-#define SW_OFF_LEVEL HIGH /* Switch off level */
-
-#define VIRT_REED_SWITCH_OFF 0
-#define VIRT_REED_SWITCH_ON 1
-
-#define REED_SWITCH_STATE_RESET 0
-#define REED_SWITCH_STATE_START_TIMER 1
-#define REED_SWITCH_STATE_STOP_TIMER 2
-#define REED_SWITCH_STATE_READ_PIN 3
-#define REED_SWITCH_STATE_ROTATE_BIN_COUNTER 4
-#define REED_SWITCH_STATE_SET_LOGIC_SWITCH 5
-
-#define DISPLAY_STATE_RESET 0
-#define DISPLAY_STATE_TIMER_RUNNING 1
-#define DISPLAY_STATE_TIMER_STOPPED 2
-#define DISPLAY_STATE_HOLD_TIMER_ON 3
-#define DISPLAY_STATE_TEMPERATURE 4
-#define DISPLAY_STATE_DO_NOTHING 5
+#include "display.h"
 
 // EDIT THE FOLLOWING TO DECLARE BUTTON PINS FOR OTHER ARDUINO BOARDS
 // const auto start_button = WIO_KEY_C;
@@ -56,15 +24,6 @@ int virtual_Reed_Switch = VIRT_REED_SWITCH_OFF; // virtual switch
 //ADC variables
 int pin_ADC_input = A1;
 
-//SM Display variables
-int state_Display = 0;
-unsigned long t_Display = 0;
-unsigned long t_0_Display = 0;
-unsigned long delay_For_Stopped_Timer = 5000; //millisec
-unsigned long t_Temp_Display = 0;
-unsigned long t_0_Temp_Display = 0;
-unsigned long delay_For_Temp_Display = 500; //millisec
-
 //SM Counter variables
 int state_counter1 = 0;      //The actual ~state~ of the state machine
 int prev_state_counter1 = 0; //Remembers the previous state (useful to know when the state has changed)
@@ -74,31 +33,10 @@ int iMinCounter1 = -1;
 int prev_iMinCounter1 = 0;
 unsigned long start_counter1 = 0;
 unsigned long elapsed_counter1 = 0;
+unsigned long autozero_start = 0;
+unsigned int  autozero_delay = 7000; // In millisec
 
 char TimeCounterStr[] = "0:00"; /** String to store time counter value, format: M:SS */
-
-TFT_eSPI tft;
-
-TFT_eSprite background(&tft);
-TFT_eSprite brew_timer(&tft);
-TFT_eSprite brew_temperature(&tft);
-TFT_eSprite brew_millivolt(&tft);
-
-void set_background(void)
-{
-    background.createSprite(320, 240);
-    background.fillSprite(TFT_WHITE);
-    background.fillRect(0, 0, 320, 60, TFT_DARKGREEN);
-    background.setTextColor(TFT_WHITE);
-    background.setFreeFont(FSSB18);
-    background.setTextSize(1);
-    background.drawString("LM Linea Mini", 50, 15);
-
-    background.drawFastVLine(150, 60, 190, TFT_DARKGREEN);
-    //background.drawFastHLine(0, 140, 320, TFT_DARKGREEN);
-    background.pushSprite(0, 0);
-    background.deleteSprite();
-}
 
 void GPIO_init(void)
 {
@@ -116,17 +54,11 @@ void setup()
     StateMachine_counter1();
     StateMachine_Reed_Switch();
     state_machine_volt_meter();
+    Display_Init();
     state_Display = DISPLAY_STATE_RESET;
     StateMachine_Display();
-    tft.init();
-    tft.setRotation(3);
-    tft.fillScreen(TFT_BLACK);
-    set_background();
-    brew_timer.createSprite(100, 60);
-    brew_temperature.createSprite(150, 60);
-    brew_millivolt.createSprite(100, 25);
     display_Timer_On_All(true,true);
-    show_temperature(TEMPERATURE_STR_V2);
+    Display_Temperature(TEMPERATURE_STR_V2, MILLI_VOLT_STR);
     show_millivolt(MILLI_VOLT_STR);
 }
 
@@ -177,10 +109,20 @@ void StateMachine_counter1(void)
         iSecCounter1 = 0;
         iMinCounter1 = 0;
         elapsed_counter1 = 0;
+        autozero_start = 0;
         state_counter1 = COUNTER_STATE_DISABLED;
         break;
     case COUNTER_STATE_DISABLED:
-        //waiting for START event
+        if (iSecCounter1 > 0 || iMinCounter1 > 0)
+        {
+            if (millis() - autozero_start > autozero_delay)
+            {
+                iSecCounter1 = 0;
+                iMinCounter1 = 0;
+                state_Display = DISPLAY_STATE_TIMER_STOPPED;
+            }
+        }
+        // waiting for START event from Reed Switch
         break;
     case COUNTER_STATE_START:
         iSecCounter1 = 0;
@@ -201,6 +143,7 @@ void StateMachine_counter1(void)
         }
         break;
     case COUNTER_STATE_STOP:
+        autozero_start = millis();
         state_counter1 = COUNTER_STATE_DISABLED;
         state_Display = DISPLAY_STATE_TIMER_STOPPED;
         break;
@@ -292,118 +235,4 @@ void StateMachine_Reed_Switch(void)
 
         break;
     }
-}
-
-void StateMachine_Display(void)
-{
-
-    switch (state_Display)
-    {
-    case DISPLAY_STATE_RESET:
-        t_0_Temp_Display = millis();
-        Display_Stopped_Timer();
-        state_Display = DISPLAY_STATE_TEMPERATURE;
-        break;
-
-    case DISPLAY_STATE_TIMER_RUNNING:
-        Display_Running_Timer();
-        // show_temperature(TEMPERATURE_STR_V2);
-        state_Display = DISPLAY_STATE_TEMPERATURE;
-        break;
-
-    case DISPLAY_STATE_TIMER_STOPPED:
-        Display_Stopped_Timer();
-        t_0_Display = millis();
-        state_Display = DISPLAY_STATE_TEMPERATURE;
-        break;
-
-    case DISPLAY_STATE_HOLD_TIMER_ON:
-        t_Display = millis();
-        if (t_Display - t_0_Display > delay_For_Stopped_Timer)
-        {
-            state_Display = DISPLAY_STATE_TEMPERATURE;
-        }
-        break;
-
-    case DISPLAY_STATE_TEMPERATURE:
-        t_Temp_Display = millis();
-        if (t_Temp_Display - t_0_Temp_Display > delay_For_Temp_Display)
-        {
-            show_temperature(TEMPERATURE_STR_V2);
-            show_millivolt(MILLI_VOLT_STR);
-            t_0_Temp_Display = millis();
-            state_Display = DISPLAY_STATE_TEMPERATURE;
-        }
-        break;
-
-    case DISPLAY_STATE_DO_NOTHING:
-        break;
-    }
-}
-
-void Display_Running_Timer(void)
-{
-    display_Timer_On_All(DISPLAY_CLEAR_FALSE, DISPLAY_STOPPED_FALSE);
-}
-
-void Display_Stopped_Timer(void)
-{
-    display_Timer_On_All(DISPLAY_CLEAR_FALSE, DISPLAY_STOPPED_TRUE);
-}
-
-void display_Timer_On_All(bool need_Display_Clear, bool need_Display_Stopped)
-{
-    update_TimeCounterStr(iMinCounter1, iSecCounter1);
-    // debug display
-#ifdef SERIAL_DEBUG_ENABLED
-    Serial.print(F("iMinCounter1: "));
-    Serial.print(iMinCounter1, DEC);
-    Serial.print(F(" iSecCounter1: "));
-    Serial.println(iSecCounter1, DEC);
-    Serial.println(TimeCounterStr);
-#endif
-
-    brew_timer.fillSprite(TFT_WHITE);
-    brew_timer.setCursor(0, 0);
-    brew_timer.setFreeFont(FSSB24);
-    brew_timer.setTextSize(1);
-    if (need_Display_Stopped)
-    {
-        brew_timer.setTextColor(TFT_DARKGREY);
-    }
-    else
-    {
-        brew_timer.setTextColor(TFT_NAVY);
-    }
-    brew_timer.drawString(TimeCounterStr, 0, 0);
-    brew_timer.pushSprite(35, 130);
-}
-
-
-void show_temperature(char *pTemperatureStr)
-{
-    char disp_string[9];
-
-    snprintf(disp_string,9,"%s *C",pTemperatureStr);
-    brew_temperature.fillSprite(TFT_WHITE);
-    brew_temperature.setCursor(0, 0);
-    brew_temperature.setFreeFont(FSSB18);
-    brew_temperature.setTextSize(1);
-    brew_temperature.setTextColor(TFT_RED);
-    brew_temperature.drawString(disp_string, 0, 0);
-    brew_temperature.pushSprite(170, 135);
-}
-
-void show_millivolt(char *pMillivoltStr)
-{
-    char disp_string[9];
-
-    snprintf(disp_string,9,"%s mV",pMillivoltStr);
-    brew_millivolt.fillSprite(TFT_WHITE);
-    brew_millivolt.setCursor(0, 0);
-    brew_millivolt.setFreeFont(FSS9);
-    brew_millivolt.setTextSize(1);
-    brew_millivolt.setTextColor(TFT_BLUE);
-    brew_millivolt.drawString(disp_string, 0, 0);
-    brew_millivolt.pushSprite(195, 215);
 }
