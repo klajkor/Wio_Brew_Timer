@@ -1,4 +1,5 @@
 #include "temperature_meter.h"
+#include <movingAvg.h>
 
 //#define SERIAL_DEBUG_ENABLED
 
@@ -34,27 +35,41 @@
 static int           state_volt_meter = VOLT_METER_STATE_RESET;
 static unsigned long t_volt_meter = 0;
 static unsigned long t_0_volt_meter = 0;
-static unsigned long delay_between_2_measures = 95; // In milliseconds
+static unsigned long delay_between_2_measures = 98; // In milliseconds
 
 // Global temperature strings
 char TEMPERATURE_STR_V2[6] = "999.9";
 char TEMPERATURE_STR_LED_V2[5] = "99.9";
 char MILLI_VOLT_STR[6] = "99999";
 
+// local ADC variables
+static float volt_div_multip = VOLT_DIV_MULTIPLIER;
+movingAvg adc_raw_moving_avg(5);
+
+void ADC_init(void)
+{
+    analogReference(AR_DEFAULT);
+    adc_raw_moving_avg.begin();
+}
+
 float get_thermistor_voltage(void)
 {
     float bus_voltage_V;
-    int ADC_raw;
+    uint16_t ADC_raw;
+    uint16_t ADC_raw_avg;
+    uint16_t ADC_milli_volt;
 
-    bus_voltage_V = 1.23;
+    bus_voltage_V = 0.123;
     ADC_raw=analogRead(pin_ADC_input);
-    bus_voltage_V = ((3.3/1023) * ADC_raw) * VOLT_DIV_MULTIPLIER;
+    ADC_raw_avg = adc_raw_moving_avg.reading(ADC_raw);    // calculate the moving average
+    ADC_milli_volt = map(ADC_raw_avg, 0, 1023, 0, 3300);
+    bus_voltage_V = ((float)(ADC_milli_volt)/1000) * volt_div_multip;
 
     // debug display
 #ifdef SERIAL_DEBUG_ENABLED
-    //Serial.print(F("Raw ADC: "));
-    //Serial.print(ADC_raw);
-    //Serial.println(F(" "));
+    Serial.print(F("Raw ADC avg: "));
+    Serial.print(ADC_raw_avg);
+    Serial.println(F(" "));
 #endif
     return bus_voltage_V;
 }

@@ -51,6 +51,7 @@ void setup()
     Serial.println(F("Debugging is ON"));
 #endif
     GPIO_init();
+    ADC_init();
     StateMachine_counter1();
     StateMachine_Reed_Switch();
     state_machine_volt_meter();

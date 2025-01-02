@@ -13,6 +13,7 @@ extern char TEMPERATURE_STR_V2[6];
 extern char TEMPERATURE_STR_LED_V2[5];
 extern char MILLI_VOLT_STR[6];
 
+void ADC_init(void);
 float get_thermistor_voltage(void);
 void  state_machine_volt_meter(void);
 float calculate_temperature_v2(float thermistor_voltage);
